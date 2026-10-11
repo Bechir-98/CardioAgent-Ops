@@ -1,0 +1,26 @@
+# Big + local-only: never commit these
+dataset/
+*.wav
+*.mp3
+*.flac
+# Model artefacts (Drive is source of truth)
+*.pt
+*.pth
+*.safetensors
+*.bin
+*.gguf
+*.onnx
+!data/samples/*.wav
+# MLflow / experiments
+mlruns/
+mlartifacts/
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+# OS
+.DS_Store
+Thumbs.db
+# Notebook checkpoints
+.ipynb_checkpoints/
