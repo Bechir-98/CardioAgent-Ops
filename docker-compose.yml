@@ -1,0 +1,46 @@
+services:
+  api-gateway:
+    build: ./services/api-gateway
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  audio-engine:
+    build: ./services/audio-engine
+    ports:
+      - "8001:8000"
+    environment:
+      MODEL_PATH: /app/artifacts/cardio_model.onnx
+      MLFLOW_TRACKING_URI: http://mlflow-server:5000
+    volumes:
+      - ./services/audio-engine/artifacts:/app/artifacts
+    restart: unless-stopped
+
+  agent-orchestrator:
+    build: ./services/agent-orchestrator
+    ports:
+      - "8002:8000"
+    restart: unless-stopped
+
+  llm-server:
+    build: ./services/llm-server
+    ports:
+      - "8003:8000"
+    restart: unless-stopped
+
+  vector-db:
+    build: ./services/vector-db
+    ports:
+      - "8004:8000"
+    restart: unless-stopped
+
+  mlflow-server:
+    build: ./services/mlflow-server
+    ports:
+      - "5000:5000"
+    environment:
+      MLFLOW_BACKEND_STORE_URI: sqlite:////data/mlflow.db
+      MLFLOW_ARTIFACT_ROOT: /data/artifacts
+    volumes:
+      - ./services/mlflow-server/data:/data
+    restart: unless-stopped
