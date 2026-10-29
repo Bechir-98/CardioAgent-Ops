@@ -4,7 +4,10 @@
 			"path": ".."
 		},
 		{
-			"path": "../../dataset"
+			"path": "../dataset"
+		},
+		{
+			"path": "../services/audio-engine"
 		}
 	],
 	"settings": {}
