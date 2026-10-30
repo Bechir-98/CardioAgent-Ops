@@ -1,4 +1,4 @@
-"""Single-split training for all models. Selects on recall(patho)."""
+"""Single-split training for all models. Selects on balanced accuracy."""
 import argparse
 import os
 import sys
@@ -49,7 +49,9 @@ def evaluate(model, loader, dev):
         for x, y in loader:
             P += model(x.to(dev)).argmax(1).cpu().tolist()
             L += y.tolist()
-    return recall_score(L, P, pos_label=1, zero_division=0)
+    sens = recall_score(L, P, pos_label=1, zero_division=0)
+    spec = recall_score(L, P, pos_label=0, zero_division=0)
+    return sens, spec, 0.5 * (sens + spec)
 
 
 def main():
@@ -60,6 +62,7 @@ def main():
     ap.add_argument("--batch", type=int, default=16)
     ap.add_argument("--out", default=os.getenv("MODEL_OUT", str(DEFAULT_OUT)))
     ap.add_argument("--tracking-uri", default=os.getenv("MLFLOW_TRACKING_URI", ""))
+    ap.add_argument("--weighted", action="store_true", help="class-weighted cross-entropy")
     ap.add_argument("--audit", action="store_true", help="run the v2 quality audit before training")
     a = ap.parse_args()
 
@@ -92,7 +95,13 @@ def main():
     te = DataLoader(SpecDS(list(zip(te_p, te_y))), batch_size=a.batch)
     model = get(a.model).to(dev)
     opt = torch.optim.AdamW(model.parameters(), lr=1e-3)
-    lossf = torch.nn.CrossEntropyLoss()
+    if a.weighted:
+        cnt = np.bincount(np.asarray(tr_y), minlength=2).astype(float)
+        w = torch.tensor(cnt.sum() / (2.0 * cnt), dtype=torch.float32, device=dev)
+        lossf = torch.nn.CrossEntropyLoss(weight=w)
+        print("class weights:", [round(v, 3) for v in w.tolist()])
+    else:
+        lossf = torch.nn.CrossEntropyLoss()
     try:
         import mlflow
         if a.tracking_uri:
@@ -114,17 +123,19 @@ def main():
             loss.backward()
             opt.step()
             tot += loss.item()
-        r = evaluate(model, te, dev)
-        print(f"epoch {ep + 1}/{a.epochs} loss={tot / max(len(tr), 1):.4f} recall_abnormal={r:.4f}")
+        sens, spec, bal = evaluate(model, te, dev)
+        print(f"epoch {ep + 1}/{a.epochs} loss={tot / max(len(tr), 1):.4f} "
+              f"sens={sens:.4f} spec={spec:.4f} bal={bal:.4f}")
         if use_mlflow:
-            mlflow.log_metrics({"loss": tot / max(len(tr), 1), "recall_abnormal": r}, step=ep)
-        if r > best:
-            best = r
+            mlflow.log_metrics({"loss": tot / max(len(tr), 1), "sensitivity": sens,
+                                "specificity": spec, "balanced_acc": bal}, step=ep)
+        if bal > best:
+            best = bal
             torch.save(model.state_dict(), a.out)
     if use_mlflow:
-        mlflow.log_metric("best_recall_abnormal", best)
+        mlflow.log_metric("best_balanced_acc", best)
         mlflow.end_run()
-    print(f"best recall_abnormal={best:.4f} -> {a.out}")
+    print(f"best balanced_acc={best:.4f} -> {a.out}")
     # ONNX export (best torch model, same Mel input -> audio-engine container)
     try:
         m = get(a.model)
