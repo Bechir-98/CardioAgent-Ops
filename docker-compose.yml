@@ -3,6 +3,14 @@ services:
     build: ./services/api-gateway
     ports:
       - "8000:8000"
+    environment:
+      # The gateway is the browser-facing UI; it proxies the RAG endpoints so
+      # the page and /ask share one origin (no CORS, no direct port exposure).
+      RAG_URL: http://llm-server:8000
+      AUDIO_URL: http://audio-engine:8000
+      VECTOR_URL: http://vector-db:8000
+    depends_on:
+      - llm-server
     restart: unless-stopped
 
   audio-engine:
@@ -26,12 +34,40 @@ services:
     build: ./services/llm-server
     ports:
       - "8003:8000"
+    environment:
+      # llama.cpp runs inside this container on the loopback port.
+      LLM_BASE_URL: http://127.0.0.1:8081/v1
+      LLM_MODEL_PATH: /models/qwen2.5-1.5b-instruct-q4_k_m.gguf
+      LLM_CTX: "4096"
+      CORPUS_DIR: /app/corpus
+      CHROMA_DIR: /data/chroma
+      CHROMA_HOST: vector-db
+      CHROMA_PORT: "8000"
+      EMBED_BACKEND: onnx
+      RAG_TOP_K: "4"
+      RAG_MIN_SCORE: "0.40"
+    depends_on:
+      vector-db:
+        condition: service_healthy
+    volumes:
+      - ./services/llm-server/models:/models:ro
+      - ./services/llm-server/corpus:/app/corpus:ro
+    # GPU offload: switch the Dockerfile to the `server-cuda` tag and add
+    #   runtime: nvidia        (or `gpus: all` on newer Compose)
+    # after installing nvidia-container-toolkit. CPU inference is the default.
     restart: unless-stopped
 
   vector-db:
     build: ./services/vector-db
     ports:
       - "8004:8000"
+    volumes:
+      - ./services/vector-db/data:/data/chroma
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v2/heartbeat', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
     restart: unless-stopped
 
   mlflow-server:
