@@ -43,6 +43,10 @@ class Chunk:
         raw = f"{self.source}|{self.section}|{self.chunk_index}"
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
+    def embed_text(self) -> str:
+        """Text used for the embedding (title carries retrieval signal)."""
+        return f"{self.section}. {self.text}".strip()
+
     def as_metadata(self) -> dict:
         return {
             "source": self.source,
@@ -116,13 +120,20 @@ def chunk_text(text: str, size: int = DEFAULT_CHUNK_SIZE, overlap: int = DEFAULT
             continue
         if current:
             chunks.append(current)
-        # A single paragraph larger than the window is hard-split.
+        # A single paragraph larger than the window is split, preferring the
+        # last sentence boundary so a recommendation is not cut in half.
         if len(paragraph) > size:
             start = 0
             while start < len(paragraph):
-                end = start + size
+                end = min(start + size, len(paragraph))
+                if end < len(paragraph):
+                    window = paragraph[start:end]
+                    boundary = max(window.rfind(". "), window.rfind("; "), window.rfind("\n"))
+                    if boundary > size // 2:
+                        end = start + boundary + 1
                 chunks.append(paragraph[start:end].strip())
-                start = end - overlap
+                next_start = end - overlap
+                start = next_start if next_start > start else end
             current = ""
         else:
             tail = current[-overlap:] if overlap and current else ""
@@ -171,7 +182,8 @@ def load_corpus(
 ) -> list[Chunk]:
     """Load and chunk every supported document under ``directory``.
 
-    ``README*`` files are treated as documentation rather than corpus text.
+    ``README*`` and ``SOURCES*`` files are treated as documentation, not corpus
+    text.
     """
     directory = Path(directory)
     if not directory.is_dir():
@@ -182,7 +194,7 @@ def load_corpus(
         for p in directory.rglob("*")
         if p.is_file()
         and p.suffix.lower() in SUPPORTED_SUFFIXES
-        and not p.name.lower().startswith("readme")
+        and not p.name.lower().startswith(("readme", "sources"))
     )
     if not files:
         raise CorpusError(f"no .md/.txt/.pdf documents found in {directory}")

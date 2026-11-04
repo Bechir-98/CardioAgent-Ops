@@ -35,7 +35,7 @@ RUN chmod +x entrypoint.sh
 ENV CORPUS_DIR=/app/corpus \
     CHROMA_DIR=/data/chroma \
     LLM_BASE_URL=http://127.0.0.1:8081/v1 \
-    LLM_MODEL_PATH=/models/qwen2.5-0.5b-instruct-q4_k_m.gguf \
+    LLM_MODEL_PATH=/models/qwen2.5-1.5b-instruct-q4_k_m.gguf \
     LLM_CTX=4096
 
 EXPOSE 8000

@@ -1,0 +1,48 @@
+name: LLM Server CI
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "services/llm-server/**"
+      - ".github/workflows/llm-server-ci.yml"
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - "services/llm-server/**"
+      - ".github/workflows/llm-server-ci.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r services/llm-server/requirements.txt
+        pip install pytest
+
+    # The suite uses the hash embedder and a stub LLM client, so no model
+    # download and no GPU are required here.
+    - name: Run llm-server tests
+      working-directory: services/llm-server
+      run: python -m pytest tests -q
+
+  compose-config:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Validate docker-compose file
+      run: docker compose config -q

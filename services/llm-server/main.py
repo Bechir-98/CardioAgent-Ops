@@ -27,6 +27,7 @@ from rag import (
     build_messages,
     load_corpus,
 )
+from rag.prompts import DONT_KNOW
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("llm-server")
@@ -42,7 +43,7 @@ class Config:
     chunk_size: int = int(os.getenv("CHUNK_SIZE", "800"))
     chunk_overlap: int = int(os.getenv("CHUNK_OVERLAP", "120"))
     top_k: int = int(os.getenv("RAG_TOP_K", "4"))
-    min_score: float = float(os.getenv("RAG_MIN_SCORE", "0.15"))
+    min_score: float = float(os.getenv("RAG_MIN_SCORE", "0.40"))
 
 
 # -- request schemas ------------------------------------------------------
@@ -53,7 +54,7 @@ class QuestionRequest(BaseModel):
 
 
 class AnswerRequest(QuestionRequest):
-    temperature: float = Field(default=0.2, ge=0.0, le=1.5)
+    temperature: float = Field(default=0.0, ge=0.0, le=1.5)
     max_tokens: int = Field(default=512, ge=16, le=2048)
 
 
@@ -197,6 +198,13 @@ def create_app(config: Config | None = None, services: Services | None = None) -
 
     # -- retrieval ---------------------------------------------------------
 
+    @app.delete("/collection")
+    def drop_collection():
+        """Clear the vector collection without re-ingesting anything."""
+        store = services.store
+        store.reset()
+        return jsonify(service="llm-server", collection=config.collection, chunks=store.count())
+
     @app.post("/query")
     def query():
         req, error = parse(QuestionRequest, request.get_json(silent=True) or {})
@@ -218,12 +226,16 @@ def create_app(config: Config | None = None, services: Services | None = None) -
             return error
 
         hits = services.store.query(req.question, k=req.k)
-        best = hits[0].score if hits else 0.0
+        # Ordering is hybrid (RRF) but the floor is calibrated on cosine, so gate
+        # on the best dense score in the retrieved set, not on rank 1.
+        best = max((hit.score for hit in hits), default=0.0)
 
         if not hits or best < config.min_score:
             return jsonify(
                 question=req.question,
-                answer=INSUFFICIENT_EVIDENCE,
+                answer=DONT_KNOW,
+                grounded=False,
+                citations=[],
                 reason="no retrieved excerpt passed the relevance threshold",
                 best_score=round(best, 4),
                 min_score=config.min_score,
@@ -242,12 +254,17 @@ def create_app(config: Config | None = None, services: Services | None = None) -
         except LlmError as exc:
             return jsonify(error="llm backend error", detail=str(exc)), 502
 
-        insufficient = INSUFFICIENT_EVIDENCE in text
+        citations = extract_citations(text, len(hits))
+        insufficient = INSUFFICIENT_EVIDENCE.lower() in text.lower()
+        # An answer with no valid citation is not grounded, even when the model
+        # forgot to emit the refusal token.
+        grounded = not insufficient and bool(citations)
+        answer = DONT_KNOW if insufficient else text.strip()
         return jsonify(
             question=req.question,
-            answer=text.strip(),
-            grounded=not insufficient,
-            citations=extract_citations(text, len(hits)),
+            answer=answer,
+            grounded=grounded,
+            citations=citations,
             best_score=round(best, 4),
             sources=[hit.as_dict(rank) for rank, hit in enumerate(hits, start=1)],
         )

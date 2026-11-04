@@ -9,7 +9,7 @@ import pytest
 from main import Config, Services, create_app
 from rag.embedder import HashEmbedder
 from rag.llm import LlmUnavailable
-from rag.prompts import INSUFFICIENT_EVIDENCE
+from rag.prompts import INSUFFICIENT_EVIDENCE, DONT_KNOW
 from rag.store import VectorStore
 
 pytest.importorskip("chromadb")
@@ -115,6 +115,14 @@ def test_query_validates_payload(client):
     assert client.post("/query", json={}).status_code == 400
 
 
+def test_delete_collection_clears_chunks(client):
+    client.post("/ingest", json={})
+    response = client.delete("/collection")
+    assert response.status_code == 200
+    assert response.get_json()["chunks"] == 0
+    assert client.post("/query", json={"question": "aortic stenosis"}).get_json()["hits"] == []
+
+
 def test_answer_is_grounded_and_cites_sources(client):
     client.post("/ingest", json={})
     response = client.post("/answer", json={"question": "how often to follow up aortic stenosis?"})
@@ -141,9 +149,28 @@ def test_answer_short_circuits_when_nothing_is_relevant(tmp_path: Path):
         response = c.post("/answer", json={"question": "zebra migration patterns"})
         assert response.status_code == 200
         payload = response.get_json()
-        assert payload["answer"] == INSUFFICIENT_EVIDENCE
+        assert payload["answer"] == DONT_KNOW
+        assert payload["grounded"] is False
+        assert payload["citations"] == []
         assert payload["sources"] == []
         assert fake.calls == []  # the model must not be called without evidence
+
+
+def test_answer_without_citation_is_not_grounded(tmp_path: Path):
+    uncited = FakeLlm(reply="Echocardiography is recommended every 6-12 months.")
+    with build_client(tmp_path, name="uncited", fake=uncited) as c:
+        c.post("/ingest", json={})
+        payload = c.post("/answer", json={"question": "aortic stenosis follow-up"}).get_json()
+        assert payload["citations"] == []
+        assert payload["grounded"] is False
+
+
+def test_answer_is_case_insensitive_to_the_refusal_token(tmp_path: Path):
+    chatty = FakeLlm(reply="Insufficient_Evidence: the corpus does not say.")
+    with build_client(tmp_path, name="chatty", fake=chatty) as c:
+        c.post("/ingest", json={})
+        payload = c.post("/answer", json={"question": "aortic stenosis follow-up"}).get_json()
+        assert payload["grounded"] is False
 
 
 def test_answer_returns_503_when_backend_is_down(tmp_path: Path):

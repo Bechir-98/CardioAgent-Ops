@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Download the GGUF used by llm-server. The file is ~470 MB and git-ignored.
+# Download the GGUF used by llm-server. The file is ~1 GB and git-ignored.
 set -euo pipefail
 
-MODEL="${1:-qwen2.5-0.5b-instruct-q4_k_m.gguf}"
-REPO="${GGUF_REPO:-Qwen/Qwen2.5-0.5B-Instruct-GGUF}"
+MODEL="${1:-qwen2.5-1.5b-instruct-q4_k_m.gguf}"
+REPO="${GGUF_REPO:-Qwen/Qwen2.5-1.5B-Instruct-GGUF}"
 DEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/models"
 
 mkdir -p "$DEST_DIR"

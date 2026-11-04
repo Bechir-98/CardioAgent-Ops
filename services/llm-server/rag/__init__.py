@@ -3,12 +3,13 @@
 from .corpus import Chunk, CorpusError, build_chunks, chunk_text, load_corpus, split_sections
 from .embedder import Embedder, HashEmbedder, build_embedder
 from .llm import LlamaCppClient, LlmError, LlmUnavailable
-from .prompts import build_messages, INSUFFICIENT_EVIDENCE
+from .prompts import build_messages, INSUFFICIENT_EVIDENCE, DONT_KNOW
 from .store import Retrieved, VectorStore
 
 __all__ = [
     "Chunk",
     "CorpusError",
+    "DONT_KNOW",
     "Embedder",
     "HashEmbedder",
     "INSUFFICIENT_EVIDENCE",

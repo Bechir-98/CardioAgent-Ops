@@ -4,39 +4,53 @@ from __future__ import annotations
 from .store import Retrieved
 
 INSUFFICIENT_EVIDENCE = "INSUFFICIENT_EVIDENCE"
+DONT_KNOW = "I don't know — this question is not covered by the guideline corpus."
 
 SYSTEM_PROMPT = (
     "You are CardioAgent, a cardiology decision-support assistant running fully on-premise.\n"
-    "Answer using ONLY the numbered guideline excerpts provided in the user message.\n"
+    "You answer ONLY from the numbered guideline excerpts in the user message.\n"
+    "\n"
     "Rules:\n"
-    "1. Cite every factual claim with the bracket number of the excerpt it came from, e.g. [1].\n"
-    "2. If the excerpts do not contain the answer, reply exactly: "
-    f"{INSUFFICIENT_EVIDENCE} and name what is missing.\n"
-    "3. Never invent thresholds, drug doses, or follow-up intervals.\n"
-    "4. Be concise: at most 150 words, plain prose, no markdown tables.\n"
-    "5. Answer in the same language as the question.\n"
-    "6. This is a research prototype, not a medical device; do not give individual patient advice."
+    f"1. If the excerpts do not contain the answer, output only: {INSUFFICIENT_EVIDENCE}\n"
+    "2. Otherwise answer in 1-3 sentences and end with the bracket number of every excerpt\n"
+    "   you used, for example [1] or [2][3].\n"
+    "3. Quote numbers, thresholds and doses exactly as they appear in the excerpts.\n"
+    "4. Never use outside knowledge. Never invent a threshold, dose or interval.\n"
+    "5. Do not repeat the question. Do not use markdown. Do not add a disclaimer.\n"
+    "6. Answer in the language of the question.\n"
+    "7. The class/level markers in the excerpts (I A, IIa B, IIb C) are not citations.\n"
+    "   Always finish with the bracket number of the excerpt you used, e.g. [1].\n"
+    "This is a research prototype, not a medical device."
+)
+
+# Format demonstration only. Deliberately contains no cardiology content, so a
+# small model cannot copy it into an answer about a real clinical question.
+FORMAT_EXAMPLE = (
+    "Format example (placeholder content, ignore its meaning):\n"
+    "Question: What is the registry identifier?\n"
+    "Answer: The registry identifier is ZX-7 [1].\n"
 )
 
 MAX_CONTEXT_CHARS = 6000
 
-_EXAMPLE = (
-    "Worked example (format only, not a real excerpt):\n"
-    "[1] source=example.md | section=Definition\n"
-    "Severe aortic stenosis is defined by a peak velocity of 4.0 m/s or more.\n\n"
-    "Question: What defines severe aortic stenosis?\n"
-    "Answer: Severe aortic stenosis is defined by a peak velocity of 4.0 m/s or more [1].\n"
-)
+# Instructions live in the system message; the user turn ends on a bare
+# "Answer:" cue. Appending instructions *after* the question made small models
+# emit only the citation numbers.
+ANSWER_CUE = "Answer:"
 
 
 def format_context(chunks: list[Retrieved], max_chars: int = MAX_CONTEXT_CHARS) -> str:
-    """Render retrieved chunks as a numbered, citable block."""
+    """Render retrieved chunks as a numbered list.
+
+    Deliberately no ``source=`` / ``section=`` prefix: small models copy any
+    header-looking line straight into the answer. The mapping from bracket
+    number to file and section is returned to the caller as ``sources``, so the
+    model never needs to see it.
+    """
     lines: list[str] = []
     used = 0
     for rank, chunk in enumerate(chunks, start=1):
-        header = f"[{rank}] source={chunk.source} | section={chunk.section}"
-        body = chunk.text.strip()
-        block = f"{header}\n{body}\n"
+        block = f"Excerpt {rank}:\n{chunk.text.strip()}\n"
         if used + len(block) > max_chars:
             break
         lines.append(block)
@@ -48,10 +62,10 @@ def build_messages(question: str, chunks: list[Retrieved]) -> list[dict]:
     """Build the chat payload sent to llama.cpp."""
     context = format_context(chunks) or "(no excerpts retrieved)"
     user = (
-        f"{_EXAMPLE}\n"
+        f"{FORMAT_EXAMPLE}\n"
         f"Guideline excerpts:\n\n{context}\n\n"
         f"Question: {question.strip()}\n\n"
-        "Answer using only the excerpts above, with bracket citations."
+        f"{ANSWER_CUE}"
     )
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
