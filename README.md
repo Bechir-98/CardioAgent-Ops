@@ -11,18 +11,18 @@ The audio pipeline is the `v2` design, now housed in
 - **log-Mel 64x128** + **MFCC-40 mean**, numpy/scipy only (no librosa)
 - PyTorch **CNN** and **CNN + Transformer** models
 - quality audit for corrupt / short / flat / clipped recordings
-- training selected on **abnormal (pathological) recall**
+- training selected on **balanced accuracy** (optional class-weighted loss)
 - ONNX export for serving
 
 ## Services
 
 | Service | Port | Purpose |
 |---|---|---|
-| `api-gateway` | 8000 | Upload UI / gateway (mock response for now) |
+| `api-gateway` | 8000 | Web UI: guideline Q&A + PCG upload |
 | `audio-engine` | 8001 | Real inference: wav -> canonical pipeline -> ONNX |
 | `agent-orchestrator` | 8002 | Health-check scaffold |
-| `llm-server` | 8003 | Health-check scaffold |
-| `vector-db` | 8004 | Health-check scaffold |
+| `llm-server` | 8003 | Local GGUF (llama.cpp) + RAG over the ESC corpus |
+| `vector-db` | 8004 | ChromaDB HTTP service (vector store) |
 | `mlflow-server` | 5000 | Experiment tracking |
 
 ## Quick start
@@ -31,7 +31,8 @@ The audio pipeline is the `v2` design, now housed in
 docker compose up --build
 ```
 
-Then:
+Then open <http://localhost:8000> for the web UI: guideline Q&A with live service
+status, and PCG analysis that proxies the upload to the ONNX audio engine.
 
 ```bash
 curl http://localhost:8001/health
@@ -41,6 +42,33 @@ curl -F "file=@services/audio-engine/data/samples/normal_1.wav" \
 
 The audio engine returns `503` on `/predict` until a model artifact exists at
 `services/audio-engine/artifacts/cardio_model.onnx`.
+
+## RAG over the ESC corpus
+
+`llm-server` hosts a GGUF model through llama.cpp and exposes a retrieval layer
+backed by ChromaDB. See [`services/llm-server/README.md`](services/llm-server/README.md);
+retrieval and answer quality are measured in
+[`services/llm-server/EVALUATION.md`](services/llm-server/EVALUATION.md).
+
+The web UI at <http://localhost:8000> asks questions through `api-gateway`, which
+proxies `POST /ask` to the RAG service and renders the answer with its cited
+excerpts.
+
+```bash
+# one-time: fetch the development GGUF (~1 GB, git-ignored)
+services/llm-server/scripts/fetch_model.sh
+
+# put ESC-derived notes in services/llm-server/corpus/*.md, then:
+docker compose up -d --build llm-server
+curl -s -X POST http://localhost:8003/ingest -H 'Content-Type: application/json' -d '{}'
+curl -s -X POST http://localhost:8003/answer \
+  -H 'Content-Type: application/json' \
+  -d '{"question": "follow-up interval for moderate aortic stenosis?"}'
+```
+
+Two models participate, only one is an LLM: a frozen MiniLM bi-encoder for
+retrieval and the GGUF for generation. Swapping in the QLoRA-exported GGUF is a
+one-variable change (`LLM_MODEL_PATH`).
 
 ## Train and export a model
 
@@ -73,6 +101,9 @@ directory into the audio-engine container.
 ```bash
 pip install -r services/audio-engine/requirements.txt
 python -m pytest services/audio-engine/tests -q
+
+pip install -r services/llm-server/requirements.txt
+python -m pytest services/llm-server/tests -q
 ```
 
 Four small wavs under `services/audio-engine/data/samples/` keep the pipeline and
@@ -111,10 +142,10 @@ paths, so only step 2 usually needs adjusting.
 ```text
 services/
   audio-engine/       canonical pipeline, API, training, tests, samples
-  api-gateway/        FastAPI upload UI
+  api-gateway/        FastAPI web UI: guideline Q&A + PCG upload
   agent-orchestrator/ health scaffold
-  llm-server/         health scaffold
-  vector-db/          health scaffold
+  llm-server/         llama.cpp + RAG (chunking, ChromaDB, /ingest, /answer)
+  vector-db/          ChromaDB HTTP service (vector store)
   mlflow-server/      tracking server
 notebooks/            EDA + benchmark notebook
 legacy/audio-engine/  previous librosa-based implementation (reference only)

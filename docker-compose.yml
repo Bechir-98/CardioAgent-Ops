@@ -77,6 +77,10 @@ services:
     environment:
       MLFLOW_BACKEND_STORE_URI: sqlite:////data/mlflow.db
       MLFLOW_ARTIFACT_ROOT: /data/artifacts
+      # Allow all Host headers for local dev (MLflow's default allows localhost
+      # on all ports, but explicitly setting --allowed-hosts overrides that and
+      # only matches exact strings, so "localhost:5000" is rejected).
+      MLFLOW_ALLOWED_HOSTS: "*"
     volumes:
       - ./services/mlflow-server/data:/data
     restart: unless-stopped

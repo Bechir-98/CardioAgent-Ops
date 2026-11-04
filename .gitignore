@@ -104,3 +104,15 @@ services/mlflow-server/data/
 # Notebook outputs / checkpoints
 .ipynb_checkpoints/
 splits_train.csv
+
+# llm-server: local model files and the Chroma persistence directory
+services/llm-server/models/
+services/llm-server/chroma/
+
+# vector-db: Chroma persistence directory
+services/vector-db/data/
+
+# llm-server corpus: guideline text is copyrighted and never redistributed
+services/llm-server/corpus/*
+!services/llm-server/corpus/README.md
+!services/llm-server/corpus/SOURCES.md
